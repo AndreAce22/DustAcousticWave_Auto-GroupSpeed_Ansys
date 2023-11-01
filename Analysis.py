@@ -675,50 +675,48 @@ sl, wl = gsc_wave_analysis(frames[start:], stepsize, peak_distance_max, peak_hei
 #%%
 plot_a(slf15_gauss)
 #%%
+#At this point the data is stored or/and added to the corresponding List (e.g. for different pressures), adjust!
 speed_list15 = sl
 wavelen_list15 = wl
 #%%
 speed_list15 = np.append(speed_list15,sl)
 wavelen_list15 = np.append(wavelen_list15,wl)
 #%%
-sl, wl = np.append(speed_list30,propagationspeed(frames[15:40], background, 410))
-speed_list30 = np.append(speed_list30,sl)
-wavelen_list30 = np.append(wavelen_list30,wl)
-#%%
 grayscaleplot(slf15)
 grayscaleplot(wavelen_list15)
+#
+#%% Gaussian Filter to smooth the data, adjust sigma!
+slf15_gauss = gaussian_filter1d(speed_list15, sigma=3)
+slf20_gauss = gaussian_filter1d(speed_list20, sigma=3)
+slf25_gauss = gaussian_filter1d(speed_list25, sigma=3)
+slf30_gauss = gaussian_filter1d(speed_list30, sigma=3)
+#%% ERROR
+error_15 = abs(np.subtract(speed_list15,slf15_gauss))
+error_20 = abs(np.subtract(speed_list20,slf20_gauss))
+error_25 = abs(np.subtract(speed_list25,slf25_gauss))
+error_30 = abs(np.subtract(speed_list30,slf30_gauss))
 #%%
-####Add Group velocity
+wl15 = gaussian_filter1d(wavelen_list15, sigma=1)
+wl20 = gaussian_filter1d(wavelen_list20, sigma=1)
+wl25 = gaussian_filter1d(wavelen_list25, sigma=1)
+wl30 = gaussian_filter1d(wavelen_list30, sigma=1)
+#%% ERROR
+wl_error_15 = abs(np.subtract(wl15,wavelen_list15))
+wl_error_20 = abs(np.subtract(wl20,wavelen_list20))
+wl_error_25 = abs(np.subtract(wl25,wavelen_list25))
+wl_error_30 = abs(np.subtract(wl30,wavelen_list30))
+#%%
+#### Add Group velocity #####
 slf15 = np.add(speed_list15,82.1)
 slf20 = np.add(speed_list20,73.8)
 slf25 = np.add(speed_list25,59.3)
 slf30 = np.add(speed_list30,56.7)
+#%% PLOT
+#bigplot_wavelen(wl15, wl20, wl25, wl30)
+#bigplot_speed(speed_list, speed_list20, speed_list25, speed_list30)
+#bigplot_speed(slf15_gauss, slf20_gauss, slf25_gauss, slf30_gauss, error_15, error_20, error_25, error_30)
 #%%
-slf15_gauss = gaussian_filter1d(slf15, sigma=3)
-slf20_gauss = gaussian_filter1d(slf20, sigma=3)
-slf25_gauss = gaussian_filter1d(slf25, sigma=3)
-slf30_gauss = gaussian_filter1d(slf30, sigma=3)
-#%% ERROR
-error_15 = abs(np.subtract(slf15,slf15_gauss))/1.5
-error_20 = abs(np.subtract(slf20,slf20_gauss))+1
-error_25 = abs(np.subtract(slf25,slf25_gauss))
-#%%
-error_30 = abs(np.subtract(slf30,slf30_gauss))+0.2
-#%%
-slf20_extended = np.append(slf20_gauss, np.flip(slf20_gauss[-20:-1]))
-error_20_extended = np.append(error_20, np.flip(error_20[-20:-1]))
-slf30_extended = np.append(slf30_gauss, np.flip(slf30_gauss[-10:-1]))
-error_30_extended = np.append(error_30, np.flip(error_30[-10:-1]))
-#%%
-wl15 = gaussian_filter1d(wavelen_list15, sigma=1)
-wl20 = gaussian_filter1d(np.append(wavelen_list20, np.flip(wavelen_list20[-20:-1])), sigma=1)
-wl25 = gaussian_filter1d(wavelen_list25, sigma=1)
-wl30 = gaussian_filter1d(np.append(wavelen_list30, np.flip(wavelen_list30[-20:-1])), sigma=1)
-#%%
-#bigplot_wavelen(wl15[20:98], wl20[15:], wl25[:98], wl30[:75])
-#bigplot_speed(speed_list, speed_list20, speed_list25[:300], speed_list30[:300])
-#bigplot_speed(slf15_gauss, slf20_extended, slf25_gauss, slf30_extended, error_15, error_20_extended, error_25, error_30_extended)
-#%%
+### Calculate Statistical Error
 #print(np.average(speed_list30))
 print(np.average(wl15),np.average(wl20),np.average(wl25),np.average(wl30))
 
