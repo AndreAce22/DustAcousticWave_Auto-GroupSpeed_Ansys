@@ -28,14 +28,23 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.optimize import curve_fit
 from sklearn import linear_model
 
+import cv2
+
 # change the following to %matplotlib notebook for interactive plotting
 #get_ipython().run_line_magic('matplotlib', 'inline')
 
 # img read
 
 frames = pims.open('wave\*.bmp')
-group_frames = pims.open('group_vel\*bmp')
+group_frames = pims.open('group_vel_iss2\*bmp')
 background = pims.open('background\\1.bmp')
+
+test = group_frames[5] > 10
+
+# Optionally, tweak styles.
+matplotlib.rc('figure',  figsize=(10, 5))
+matplotlib.rc('image', cmap='gray')
+plt.imshow(test)
 
 ### --- Generate Greyscale Horizontal ---- ###
 
@@ -65,6 +74,7 @@ def grey_sum(frame):
        
 def grayscale_v(frame):
     imgshape = frame.shape
+    print(imgshape)
     grayscale = np.empty(imgshape[0], dtype=float)
     numrow=0;
     
@@ -72,7 +82,7 @@ def grayscale_v(frame):
         sumpixel=0;
         for column in range(imgshape[0]):
             sumpixel += row[column];
-        grayscale[numrow] = sumpixel/imgshape[0];
+        grayscale[numrow] = sumpixel/imgshape[1];
         numrow+=1;
     return grayscale    
 
@@ -92,7 +102,7 @@ def crop_coord_y(frame):
     
     data = smooth(data,2)
     
-    #plot_1set(data)
+    plot_a(data)
     
     return np.array(data).argmax()
            
@@ -107,7 +117,7 @@ def smooth(data,sigma):
 
 ### --- Sience Grayscale Plot --- ###
 
-def plot_fit_group(data):
+def plot_fit_group(data, pix_size, fps):
     arr_referenc =  np.arange(len(data))
     fig, ax = plt.subplots(dpi=600)
     fig.set_size_inches(6, 6)
@@ -120,7 +130,7 @@ def plot_fit_group(data):
     #adds a title and axes labels
     #ax.set_title('')
     plt.xlabel('Time [frames]')
-    plt.ylabel('Wavespeed [mm/s]')
+    plt.ylabel('Wave position [mm]')
  
     #removing top and right borders
     #ax.spines['top'].set_visible(False)
@@ -335,19 +345,25 @@ def grayscaleplot_dataset(dataset):
 
 ### - Estimate Group Velocity of Cloud-Head - ### 
 
-rng = 10 
+rng = 15 
 cutwidth = 100
 cut = 0
 
-for i in frames[:rng]:
+fps = 62.5
+pix_size = 14.2 * 10**(-3)  #in mm
+faktor = 1/(fps*pix_size)
+
+for i in group_frames[:5+rng]:
     cut += crop_coord_y(i)
 cut = int(cut/rng)
 
+#%%
+
 pos0 = []
 
-for x in group_frames[:30]:
-    prog = grey_sum(x[(cut-cutwidth):(cut+cutwidth),:] > 5)
-    peaks, _ = find_peaks(prog, distance=100, height=5)
+for x in group_frames[:40]:
+    prog = gaussian_filter1d(grey_sum(x[(cut-cutwidth):,:]>10),sigma=12)
+    peaks, _ = find_peaks(prog, distance=100, height=20)
     
     fig = plt.figure(figsize = (10,10), dpi=100) # create a 5 x 5 figure
     ax = fig.add_subplot(111)
@@ -357,12 +373,21 @@ for x in group_frames[:30]:
     plt.show()
     
     if len(peaks) != 0:
-        pos0.append(peaks[0])
+        pos0.append(peaks[-1])
     else:
         print("No Peak found")
-    
-result = plot_fit_group(pos0)
-print(str(result) + " * d/dx = v_ph")
+             
+poly_result = plot_fit_group(pos0, pix_size, fps)
+
+result = np.polyder(poly_result)
+
+s = 0   ## standardabweichung ##
+for i in range(len(pos0)):
+    s += (pos0[i] - poly_result(i))**2
+s = np.sqrt((1/(len(pos0)-1))*s)
+dx = s/np.sqrt(len(pos0))
+
+print("Group speed v(x) = " + str(result*faktor) + "\pm" + str(dx*faktor))
 
 #%%
 
