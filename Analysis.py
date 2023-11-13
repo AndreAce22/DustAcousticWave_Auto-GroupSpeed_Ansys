@@ -361,8 +361,11 @@ cut = int(cut/rng)
 
 pos0 = []
 
+threshold = 10
+
+
 for x in group_frames[:40]:
-    prog = gaussian_filter1d(grey_sum(x[(cut-cutwidth):,:]>10),sigma=12)
+    prog = gaussian_filter1d(grey_sum(x[(cut-cutwidth):,:]>threshold),sigma=12)
     peaks, _ = find_peaks(prog, distance=100, height=20)
     
     fig = plt.figure(figsize = (10,10), dpi=100) # create a 5 x 5 figure
