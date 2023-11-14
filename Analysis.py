@@ -28,6 +28,8 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.optimize import curve_fit
 from sklearn import linear_model
 
+from scipy.spatial import ConvexHull
+
 import cv2
 
 # change the following to %matplotlib notebook for interactive plotting
@@ -360,18 +362,67 @@ cut = int(cut/rng)
 #%%
 
 pos0 = []
-
+limit = []
 threshold = 10
+gate = 20
+
+def envelope(sig, distance):
+    # split signal into negative and positive parts
+    u_x = np.where(sig > 0)[0]
+    l_x = np.where(sig < 0)[0]
+    u_y = sig.copy()
+    u_y[l_x] = 0
+    l_y = -sig.copy()
+    l_y[u_x] = 0
+    
+    # find upper and lower peaks
+    u_peaks, _ = scipy.signal.find_peaks(u_y, distance=distance)
+    l_peaks, _ = scipy.signal.find_peaks(l_y, distance=distance)
+    
+    # use peaks and peak values to make envelope
+    u_x = u_peaks
+    u_y = sig[u_peaks]
+    l_x = l_peaks
+    l_y = sig[l_peaks]
+    
+    # add start and end of signal to allow proper indexing
+    end = len(sig)
+    u_x = np.concatenate((u_x, [0, end]))
+    u_y = np.concatenate((u_y, [0, 0]))
+    l_x = np.concatenate((l_x, [0, end]))
+    l_y = np.concatenate((l_y, [0, 0]))
+    
+    # create envelope functions
+    u = scipy.interpolate.interp1d(u_x, u_y)
+    l = scipy.interpolate.interp1d(l_x, l_y)
+    
+    return u, l
 
 
-for x in group_frames[:40]:
-    prog = gaussian_filter1d(grey_sum(x[(cut-cutwidth):,:]>threshold),sigma=12)
+
+for x in group_frames:
+    prog = gaussian_filter1d(grey_sum(x[(cut-cutwidth):,:]>threshold),sigma=25)
     peaks, _ = find_peaks(prog, distance=100, height=20)
+    
+    u, l = envelope(prog, 10)
+    x = np.arange(len(prog))
+    
+    value = u(x)
+    value = value[::-1]
+    check = 0
+    for i in range(len(value)):
+        if value[i] > gate and check == 0:
+            limit.append(i)
+            check = i      
     
     fig = plt.figure(figsize = (10,10), dpi=100) # create a 5 x 5 figure
     ax = fig.add_subplot(111)
+    plt.plot(x, value, label="envelope")
     ax.plot(prog, linewidth=0.8, label="Flux")           #, color='#00429d'
     ax.plot(peaks, prog[peaks], "x", label="Peaks_detected")
+    
+    ax.axvline(check, linestyle='dashed', color='r');
+    
     plt.legend()
     plt.show()
     
@@ -379,18 +430,31 @@ for x in group_frames[:40]:
         pos0.append(peaks[-1])
     else:
         print("No Peak found")
-             
+ 
+limit = limit[::-1]
+            
 poly_result = plot_fit_group(pos0, pix_size, fps)
 
+poly_result2 = plot_fit_group(limit, pix_size, fps)
+
 result = np.polyder(poly_result)
+
+result2 = np.polyder(poly_result2)
 
 s = 0   ## standardabweichung ##
 for i in range(len(pos0)):
     s += (pos0[i] - poly_result(i))**2
-s = np.sqrt((1/(len(pos0)-1))*s)
+s = np.sqrt((1/(len(pos0)))*s)
 dx = s/np.sqrt(len(pos0))
 
+s2 = 0   ## standardabweichung ##
+for i in range(len(limit)):
+    s2 += (limit[i] - poly_result2(i))**2
+s2 = np.sqrt((1/(len(limit)))*s2)
+dx2 = s2/np.sqrt(len(limit))
+
 print("Group speed v(x) = " + str(result*faktor) + "\pm" + str(dx*faktor))
+print("Group speed v(x) = " + str(result2*faktor) + "\pm" + str(dx2*faktor))
 
 #%%
 
@@ -751,7 +815,7 @@ print(np.average(wl15),np.average(wl20),np.average(wl25),np.average(wl30))
 s = 0   ## standardabweichung ##
 for i in range(len(wl30)):
     s += (wl30[i] - np.average(wl30))**2
-s = np.sqrt((1/(len(wl30)-1))*s)
+s = np.sqrt((1/(len(wl30)))*s)
 dx = s/np.sqrt(len(wl30))
 print(dx)
 
