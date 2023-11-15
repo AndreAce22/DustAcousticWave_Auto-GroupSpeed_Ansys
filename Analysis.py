@@ -28,14 +28,25 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.optimize import curve_fit
 from sklearn import linear_model
 
+from scipy.spatial import ConvexHull
+
+import cv2
+
 # change the following to %matplotlib notebook for interactive plotting
 #get_ipython().run_line_magic('matplotlib', 'inline')
 
 # img read
 
 frames = pims.open('wave\*.bmp')
-group_frames = pims.open('group_vel\*bmp')
+group_frames = pims.open('group_vel_iss2\*bmp')
 background = pims.open('background\\1.bmp')
+
+test = group_frames[5] > 10
+
+# Optionally, tweak styles.
+matplotlib.rc('figure',  figsize=(10, 5))
+matplotlib.rc('image', cmap='gray')
+plt.imshow(test)
 
 ### --- Generate Greyscale Horizontal ---- ###
 
@@ -65,6 +76,7 @@ def grey_sum(frame):
        
 def grayscale_v(frame):
     imgshape = frame.shape
+    print(imgshape)
     grayscale = np.empty(imgshape[0], dtype=float)
     numrow=0;
     
@@ -72,7 +84,7 @@ def grayscale_v(frame):
         sumpixel=0;
         for column in range(imgshape[0]):
             sumpixel += row[column];
-        grayscale[numrow] = sumpixel/imgshape[0];
+        grayscale[numrow] = sumpixel/imgshape[1];
         numrow+=1;
     return grayscale    
 
@@ -92,7 +104,7 @@ def crop_coord_y(frame):
     
     data = smooth(data,2)
     
-    #plot_1set(data)
+    plot_a(data)
     
     return np.array(data).argmax()
            
@@ -107,7 +119,7 @@ def smooth(data,sigma):
 
 ### --- Sience Grayscale Plot --- ###
 
-def plot_fit_group(data):
+def plot_fit_group(data, pix_size, fps):
     arr_referenc =  np.arange(len(data))
     fig, ax = plt.subplots(dpi=600)
     fig.set_size_inches(6, 6)
@@ -120,7 +132,7 @@ def plot_fit_group(data):
     #adds a title and axes labels
     #ax.set_title('')
     plt.xlabel('Time [frames]')
-    plt.ylabel('Wavespeed [mm/s]')
+    plt.ylabel('Wave position [mm]')
  
     #removing top and right borders
     #ax.spines['top'].set_visible(False)
@@ -335,34 +347,114 @@ def grayscaleplot_dataset(dataset):
 
 ### - Estimate Group Velocity of Cloud-Head - ### 
 
-rng = 10 
+rng = 15 
 cutwidth = 100
 cut = 0
 
-for i in frames[:rng]:
+fps = 62.5
+pix_size = 14.2 * 10**(-3)  #in mm
+faktor = 1/(fps*pix_size)
+
+for i in group_frames[:5+rng]:
     cut += crop_coord_y(i)
 cut = int(cut/rng)
 
-pos0 = []
+#%%
 
-for x in group_frames[:30]:
-    prog = grey_sum(x[(cut-cutwidth):(cut+cutwidth),:] > 5)
-    peaks, _ = find_peaks(prog, distance=100, height=5)
+pos0 = []
+limit = []
+threshold = 10
+gate = 20
+
+def envelope(sig, distance):
+    # split signal into negative and positive parts
+    u_x = np.where(sig > 0)[0]
+    l_x = np.where(sig < 0)[0]
+    u_y = sig.copy()
+    u_y[l_x] = 0
+    l_y = -sig.copy()
+    l_y[u_x] = 0
+    
+    # find upper and lower peaks
+    u_peaks, _ = scipy.signal.find_peaks(u_y, distance=distance)
+    l_peaks, _ = scipy.signal.find_peaks(l_y, distance=distance)
+    
+    # use peaks and peak values to make envelope
+    u_x = u_peaks
+    u_y = sig[u_peaks]
+    l_x = l_peaks
+    l_y = sig[l_peaks]
+    
+    # add start and end of signal to allow proper indexing
+    end = len(sig)
+    u_x = np.concatenate((u_x, [0, end]))
+    u_y = np.concatenate((u_y, [0, 0]))
+    l_x = np.concatenate((l_x, [0, end]))
+    l_y = np.concatenate((l_y, [0, 0]))
+    
+    # create envelope functions
+    u = scipy.interpolate.interp1d(u_x, u_y)
+    l = scipy.interpolate.interp1d(l_x, l_y)
+    
+    return u, l
+
+
+
+for x in group_frames:
+    prog = gaussian_filter1d(grey_sum(x[(cut-cutwidth):,:]>threshold),sigma=25)
+    peaks, _ = find_peaks(prog, distance=100, height=20)
+    
+    u, l = envelope(prog, 10)
+    x = np.arange(len(prog))
+    
+    value = u(x)
+    value = value[::-1]
+    check = 0
+    for i in range(len(value)):
+        if value[i] > gate and check == 0:
+            limit.append(i)
+            check = i      
     
     fig = plt.figure(figsize = (10,10), dpi=100) # create a 5 x 5 figure
     ax = fig.add_subplot(111)
+    plt.plot(x, value, label="envelope")
     ax.plot(prog, linewidth=0.8, label="Flux")           #, color='#00429d'
     ax.plot(peaks, prog[peaks], "x", label="Peaks_detected")
+    
+    ax.axvline(check, linestyle='dashed', color='r');
+    
     plt.legend()
     plt.show()
     
     if len(peaks) != 0:
-        pos0.append(peaks[0])
+        pos0.append(peaks[-1])
     else:
         print("No Peak found")
-    
-result = plot_fit_group(pos0)
-print(str(result) + " * d/dx = v_ph")
+ 
+limit = limit[::-1]
+            
+poly_result = plot_fit_group(pos0, pix_size, fps)
+
+poly_result2 = plot_fit_group(limit, pix_size, fps)
+
+result = np.polyder(poly_result)
+
+result2 = np.polyder(poly_result2)
+
+s = 0   ## standardabweichung ##
+for i in range(len(pos0)):
+    s += (pos0[i] - poly_result(i))**2
+s = np.sqrt((1/(len(pos0)))*s)
+dx = s/np.sqrt(len(pos0))
+
+s2 = 0   ## standardabweichung ##
+for i in range(len(limit)):
+    s2 += (limit[i] - poly_result2(i))**2
+s2 = np.sqrt((1/(len(limit)))*s2)
+dx2 = s2/np.sqrt(len(limit))
+
+print("Group speed v(x) = " + str(result*faktor) + "\pm" + str(dx*faktor))
+print("Group speed v(x) = " + str(result2*faktor) + "\pm" + str(dx2*faktor))
 
 #%%
 
@@ -675,57 +767,55 @@ sl, wl = gsc_wave_analysis(frames[start:], stepsize, peak_distance_max, peak_hei
 #%%
 plot_a(slf15_gauss)
 #%%
+#At this point the data is stored or/and added to the corresponding List (e.g. for different pressures), adjust!
 speed_list15 = sl
 wavelen_list15 = wl
 #%%
 speed_list15 = np.append(speed_list15,sl)
 wavelen_list15 = np.append(wavelen_list15,wl)
 #%%
-sl, wl = np.append(speed_list30,propagationspeed(frames[15:40], background, 410))
-speed_list30 = np.append(speed_list30,sl)
-wavelen_list30 = np.append(wavelen_list30,wl)
-#%%
 grayscaleplot(slf15)
 grayscaleplot(wavelen_list15)
+#
+#%% Gaussian Filter to smooth the data, adjust sigma!
+slf15_gauss = gaussian_filter1d(speed_list15, sigma=3)
+slf20_gauss = gaussian_filter1d(speed_list20, sigma=3)
+slf25_gauss = gaussian_filter1d(speed_list25, sigma=3)
+slf30_gauss = gaussian_filter1d(speed_list30, sigma=3)
+#%% ERROR
+error_15 = abs(np.subtract(speed_list15,slf15_gauss))
+error_20 = abs(np.subtract(speed_list20,slf20_gauss))
+error_25 = abs(np.subtract(speed_list25,slf25_gauss))
+error_30 = abs(np.subtract(speed_list30,slf30_gauss))
 #%%
-####Add Group velocity
+wl15 = gaussian_filter1d(wavelen_list15, sigma=1)
+wl20 = gaussian_filter1d(wavelen_list20, sigma=1)
+wl25 = gaussian_filter1d(wavelen_list25, sigma=1)
+wl30 = gaussian_filter1d(wavelen_list30, sigma=1)
+#%% ERROR
+wl_error_15 = abs(np.subtract(wl15,wavelen_list15))
+wl_error_20 = abs(np.subtract(wl20,wavelen_list20))
+wl_error_25 = abs(np.subtract(wl25,wavelen_list25))
+wl_error_30 = abs(np.subtract(wl30,wavelen_list30))
+#%%
+#### Add Group velocity #####
 slf15 = np.add(speed_list15,82.1)
 slf20 = np.add(speed_list20,73.8)
 slf25 = np.add(speed_list25,59.3)
 slf30 = np.add(speed_list30,56.7)
+#%% PLOT
+#bigplot_wavelen(wl15, wl20, wl25, wl30)
+#bigplot_speed(speed_list, speed_list20, speed_list25, speed_list30)
+#bigplot_speed(slf15_gauss, slf20_gauss, slf25_gauss, slf30_gauss, error_15, error_20, error_25, error_30)
 #%%
-slf15_gauss = gaussian_filter1d(slf15, sigma=3)
-slf20_gauss = gaussian_filter1d(slf20, sigma=3)
-slf25_gauss = gaussian_filter1d(slf25, sigma=3)
-slf30_gauss = gaussian_filter1d(slf30, sigma=3)
-#%% ERROR
-error_15 = abs(np.subtract(slf15,slf15_gauss))/1.5
-error_20 = abs(np.subtract(slf20,slf20_gauss))+1
-error_25 = abs(np.subtract(slf25,slf25_gauss))
-#%%
-error_30 = abs(np.subtract(slf30,slf30_gauss))+0.2
-#%%
-slf20_extended = np.append(slf20_gauss, np.flip(slf20_gauss[-20:-1]))
-error_20_extended = np.append(error_20, np.flip(error_20[-20:-1]))
-slf30_extended = np.append(slf30_gauss, np.flip(slf30_gauss[-10:-1]))
-error_30_extended = np.append(error_30, np.flip(error_30[-10:-1]))
-#%%
-wl15 = gaussian_filter1d(wavelen_list15, sigma=1)
-wl20 = gaussian_filter1d(np.append(wavelen_list20, np.flip(wavelen_list20[-20:-1])), sigma=1)
-wl25 = gaussian_filter1d(wavelen_list25, sigma=1)
-wl30 = gaussian_filter1d(np.append(wavelen_list30, np.flip(wavelen_list30[-20:-1])), sigma=1)
-#%%
-#bigplot_wavelen(wl15[20:98], wl20[15:], wl25[:98], wl30[:75])
-#bigplot_speed(speed_list, speed_list20, speed_list25[:300], speed_list30[:300])
-#bigplot_speed(slf15_gauss, slf20_extended, slf25_gauss, slf30_extended, error_15, error_20_extended, error_25, error_30_extended)
-#%%
+### Calculate Statistical Error
 #print(np.average(speed_list30))
 print(np.average(wl15),np.average(wl20),np.average(wl25),np.average(wl30))
 
 s = 0   ## standardabweichung ##
 for i in range(len(wl30)):
     s += (wl30[i] - np.average(wl30))**2
-s = np.sqrt((1/(len(wl30)-1))*s)
+s = np.sqrt((1/(len(wl30)))*s)
 dx = s/np.sqrt(len(wl30))
 print(dx)
 
