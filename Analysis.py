@@ -9,6 +9,7 @@ Grayscale Analysis
 
 from __future__ import division, unicode_literals, print_function # Für die Kompatibilität mit Python 2 und 3.
 import time
+from tqdm import tqdm
 startzeit = time.time()
 import matplotlib
 import matplotlib.mlab as mlab
@@ -23,12 +24,12 @@ from tsmoothie.smoother import *
 import pims
 import scipy.ndimage as nd
 import scipy.stats
+from scipy.stats import t
 from scipy.signal import find_peaks, hilbert, chirp, argrelmax
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.optimize import curve_fit
-from sklearn import linear_model
 
-from scipy.spatial import ConvexHull
+from sklearn import linear_model
 
 import cv2
 
@@ -120,11 +121,11 @@ def smooth(data,sigma):
 ### --- Sience Grayscale Plot --- ###
 
 def plot_fit_group(data, pix_size, fps):
+    
     arr_referenc =  np.arange(len(data))
     fig, ax = plt.subplots(dpi=600)
     fig.set_size_inches(6, 6)
-    #x_peak = find_peaks(data,height=2.4)
-    #print(x_peak[0][0])
+    
     #fig.savefig('test2png.png', dpi=100)
     #color pattern: '#00429d' blue, '#b03a2e' red, '#1e8449' green
     ax.scatter(arr_referenc,data, color='#00429d', marker='^')
@@ -133,18 +134,6 @@ def plot_fit_group(data, pix_size, fps):
     #ax.set_title('')
     plt.xlabel('Time [frames]')
     plt.ylabel('Wave position [mm]')
- 
-    #removing top and right borders
-    #ax.spines['top'].set_visible(False)
-    #ax.spines['right'].set_visible(False) 
-    
-    #Edit tick 
-    #ax.xaxis.set_minor_locator(MultipleLocator(125))
-    #ax.yaxis.set_minor_locator(MultipleLocator(.1))
-
-    #add vertical lines
-    #ax.axvline(left, linestyle='dashed', color='b');
-    #ax.axvline(right, linestyle='dashed', color='b');
 
     #adds major gridlines
     ax.grid(color='grey', linestyle='-', linewidth=0.25, alpha=0.5)
@@ -157,8 +146,7 @@ def plot_fit_group(data, pix_size, fps):
     #ax.legend(bbox_to_anchor=(1, 1), loc=1, frameon=False, fontsize=16)
     
     coef = np.polyfit(arr_referenc,data,1)
-    poly1d_fn = np.poly1d(coef) 
-    # poly1d_fn is now a function which takes in x and returns an estimate for y
+    poly1d_fn = np.poly1d(coef)             # poly1d_fn is now a function which takes in x and returns an estimate for y
     
     ax.plot(arr_referenc, poly1d_fn(arr_referenc), '--k') #'--k'=black dashed line, 'yo' = yellow circle marker
     
@@ -347,25 +335,6 @@ def grayscaleplot_dataset(dataset):
 
 ### - Estimate Group Velocity of Cloud-Head - ### 
 
-rng = 15 
-cutwidth = 100
-cut = 0
-
-fps = 62.5
-pix_size = 14.2 * 10**(-3)  #in mm
-faktor = 1/(fps*pix_size)
-
-for i in group_frames[:5+rng]:
-    cut += crop_coord_y(i)
-cut = int(cut/rng)
-
-#%%
-
-pos0 = []
-limit = []
-threshold = 10
-gate = 20
-
 def envelope(sig, distance):
     # split signal into negative and positive parts
     u_x = np.where(sig > 0)[0]
@@ -398,63 +367,80 @@ def envelope(sig, distance):
     
     return u, l
 
+def wavefront_detection(group_frames,threshold, gate, gauss_sigma, envelope_step, cut_width):
+    limit = []
 
+    cut = int(group_frames[0].shape[0] - cut_width)  #cut out the bottom
 
-for x in group_frames:
-    prog = gaussian_filter1d(grey_sum(x[(cut-cutwidth):,:]>threshold),sigma=25)
-    peaks, _ = find_peaks(prog, distance=100, height=20)
-    
-    u, l = envelope(prog, 10)
-    x = np.arange(len(prog))
-    
-    value = u(x)
-    value = value[::-1]
-    check = 0
-    for i in range(len(value)):
-        if value[i] > gate and check == 0:
-            limit.append(i)
-            check = i      
-    
-    fig = plt.figure(figsize = (10,10), dpi=100) # create a 5 x 5 figure
-    ax = fig.add_subplot(111)
-    plt.plot(x, value, label="envelope")
-    ax.plot(prog, linewidth=0.8, label="Flux")           #, color='#00429d'
-    ax.plot(peaks, prog[peaks], "x", label="Peaks_detected")
-    
-    ax.axvline(check, linestyle='dashed', color='r');
-    
-    plt.legend()
-    plt.show()
-    
-    if len(peaks) != 0:
-        pos0.append(peaks[-1])
-    else:
-        print("No Peak found")
- 
-limit = limit[::-1]
+    fps = 62.5
+    pix_size = 14.2 * 10**(-3)  #in mm
+    faktor = 1/(fps*pix_size)
+
+    items = range(len(group_frames))
+    for item in tqdm(items, desc="Processing items", unit="item"):
+        frame = group_frames[item]
+        prog = gaussian_filter1d(grey_sum(frame[int(cut-(cut_width/2)):int(cut+(cut_width/2)),:]>threshold),sigma=gauss_sigma)
+        #
+        u, l = envelope(prog, envelope_step)
+        # 
+        x = np.arange(len(prog))
+        value = u(x)
+        value = value[::-1]
+        check = 0
             
-poly_result = plot_fit_group(pos0, pix_size, fps)
+        for i in range(len(value)):
+            if value[i] > gate and check == 0:
+                limit.append(i)
+                check = i      
+            
+        ### PLOT ###
+        fig = plt.figure(figsize = (10,10), dpi=100) # create a 5 x 5 figure
+        ax = fig.add_subplot(111)
+        plt.plot(x, value, label="envelope")
+        ax.plot(prog[::-1], linewidth=0.8, label="Flux")           #, color='#00429d'
+        #
+        if check != 0:
+            ax.axvline(check, linestyle='dashed', color='r');
+        #
+        plt.legend()
+        plt.show()
+     
+    limit = limit[::-1]
+                
+    poly_result2 = plot_fit_group(limit, pix_size, fps)
+    result2 = np.polyder(poly_result2)
+    
 
-poly_result2 = plot_fit_group(limit, pix_size, fps)
+    s2 = 0   ## standardabweichung ##
+    for i in range(len(limit)):
+        s2 += (limit[i] - poly_result2(i))**2
+    s2 = np.sqrt((1/(len(limit)-1))*s2)
+    dx2 = s2/np.sqrt(len(limit))
+    
+    dx2_in_mm = dx2 * pix_size
+    result2_in_mmps = result2*faktor
+    s_in_mm = (limit[-1]-limit[0]) * pix_size
+    
+    print("Group speed v = " + str(result2_in_mmps) + " \pm " + str(result2_in_mmps*dx2_in_mm/s_in_mm) + " \frac(mm)(s)")
+    
+    return result2_in_mmps, result2_in_mmps*dx2_in_mm/s_in_mm
 
-result = np.polyder(poly_result)
+### Parameter to Adjust ###
 
-result2 = np.polyder(poly_result2)
-
-s = 0   ## standardabweichung ##
-for i in range(len(pos0)):
-    s += (pos0[i] - poly_result(i))**2
-s = np.sqrt((1/(len(pos0)))*s)
-dx = s/np.sqrt(len(pos0))
-
-s2 = 0   ## standardabweichung ##
-for i in range(len(limit)):
-    s2 += (limit[i] - poly_result2(i))**2
-s2 = np.sqrt((1/(len(limit)))*s2)
-dx2 = s2/np.sqrt(len(limit))
-
-print("Group speed v(x) = " + str(result*faktor) + "\pm" + str(dx*faktor))
-print("Group speed v(x) = " + str(result2*faktor) + "\pm" + str(dx2*faktor))
+parameters = [np.arange(5,20,1),        #threshold
+              np.arange(5,80,1),        #gate
+              np.arange(1,40,1),        #gauss_sigma
+              np.arange(1,100,10),      #envelope_step
+              ]
+#Adjustables
+cut_width = 100
+#
+threshold = 10
+gate = 20
+gauss_sigma = 20
+envelope_step = 5
+#
+result_v, error = wavefront_detection(group_frames[:-4], threshold, gate, gauss_sigma, envelope_step, cut_width)
 
 #%%
 
