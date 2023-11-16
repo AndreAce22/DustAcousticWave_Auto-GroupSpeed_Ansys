@@ -411,19 +411,22 @@ def wavefront_detection(group_frames,threshold, gate, gauss_sigma, envelope_step
     result2 = np.polyder(poly_result2)
     
 
-    s2 = 0   ## standardabweichung ##
+    s2 = 0   ## standard deviation of x ##
     for i in range(len(limit)):
         s2 += (limit[i] - poly_result2(i))**2
     s2 = np.sqrt((1/(len(limit)-1))*s2)
     dx2 = s2/np.sqrt(len(limit))
     
+    ### error of v ###
+    
     dx2_in_mm = dx2 * pix_size
-    result2_in_mmps = result2*faktor
+    v_in_mms = result2 * faktor
     s_in_mm = (limit[-1]-limit[0]) * pix_size
+    dv_in_mms = v_in_mms*dx2_in_mm/s_in_mm
     
-    print("Group speed v = " + str(result2_in_mmps) + " \pm " + str(result2_in_mmps*dx2_in_mm/s_in_mm) + " \frac(mm)(s)")
+    print("Group speed v = " + str(v_in_mms) + " \pm " + str(dv_in_mms) + " \frac(mm)(s)")
     
-    return result2_in_mmps, result2_in_mmps*dx2_in_mm/s_in_mm
+    return v_in_mms, dv_in_mms
 
 ### Parameter to Adjust ###
 
