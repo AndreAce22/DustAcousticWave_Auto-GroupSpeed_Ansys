@@ -42,7 +42,7 @@ frames = pims.open('wave\*.bmp')
 group_frames = pims.open('group_vel_iss2\*bmp')
 background = pims.open('background\\1.bmp')
 
-test = group_frames[5] > 10
+test = group_frames[10] > 4
 
 # Optionally, tweak styles.
 matplotlib.rc('figure',  figsize=(10, 5))
@@ -367,10 +367,10 @@ def envelope(sig, distance):
     
     return u, l
 
-def wavefront_detection(group_frames,threshold, gate, gauss_sigma, envelope_step, cut_width):
+def wavefront_detection(group_frames,threshold, gate, gauss_sigma, envelope_step, cut_width, cut, reverse_data):
     limit = []
 
-    cut = int(group_frames[0].shape[0] - cut_width)  #cut out the bottom
+    #cut = 1250 #int(group_frames[0].shape[0] - cut_width)  #cut out the bottom
 
     fps = 62.5
     pix_size = 14.2 * 10**(-3)  #in mm
@@ -385,9 +385,11 @@ def wavefront_detection(group_frames,threshold, gate, gauss_sigma, envelope_step
         # 
         x = np.arange(len(prog))
         value = u(x)
-        value = value[::-1]
-        check = 0
+        if reverse_data == True:    
+            prog = prog[::-1]
+            value = value[::-1]
             
+        check = 0
         for i in range(len(value)):
             if value[i] > gate and check == 0:
                 limit.append(i)
@@ -397,16 +399,17 @@ def wavefront_detection(group_frames,threshold, gate, gauss_sigma, envelope_step
         fig = plt.figure(figsize = (10,10), dpi=100) # create a 5 x 5 figure
         ax = fig.add_subplot(111)
         plt.plot(x, value, label="envelope")
-        ax.plot(prog[::-1], linewidth=0.8, label="Flux")           #, color='#00429d'
+        ax.plot(prog, linewidth=0.8, label="Flux")           #, color='#00429d'
         #
         if check != 0:
             ax.axvline(check, linestyle='dashed', color='r');
         #
         plt.legend()
         plt.show()
-     
-    limit = limit[::-1]
-                
+
+    if reverse_data == True:    
+        limit = limit[::-1]
+           
     poly_result2 = plot_fit_group(limit, pix_size, fps)
     result2 = np.polyder(poly_result2)
     
@@ -424,7 +427,7 @@ def wavefront_detection(group_frames,threshold, gate, gauss_sigma, envelope_step
     s_in_mm = (limit[-1]-limit[0]) * pix_size
     dv_in_mms = v_in_mms*dx2_in_mm/s_in_mm
     
-    print("Group speed v = " + str(v_in_mms) + " \pm " + str(dv_in_mms) + " \frac(mm)(s)")
+    print("Group speed v = " + str(v_in_mms) + " /pm " + str(dv_in_mms) + " /frac(mm)(s)")
     
     return v_in_mms, dv_in_mms
 
@@ -436,15 +439,16 @@ parameters = [np.arange(5,20,1),        #threshold
               np.arange(1,100,10),      #envelope_step
               ]
 #Adjustables
+cut = 600
 cut_width = 100
+reverse_data = False
 #
-threshold = 10
-gate = 20
+threshold = 4
+gate = 2
 gauss_sigma = 20
 envelope_step = 5
 #
-result_v, error = wavefront_detection(group_frames[:-4], threshold, gate, gauss_sigma, envelope_step, cut_width)
-
+result_v, error = wavefront_detection(group_frames, threshold, gate, gauss_sigma, envelope_step, cut_width, cut, reverse_data)
 #%%
 
 def pattern2D(data, threshold, background, fps):
