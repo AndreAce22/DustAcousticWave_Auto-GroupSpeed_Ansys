@@ -28,7 +28,7 @@ from scipy.stats import t
 from scipy.signal import find_peaks, hilbert, chirp, argrelmax
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.optimize import curve_fit
-
+import scipy.special as scsp
 from sklearn import linear_model
 
 import cv2
@@ -38,8 +38,8 @@ import cv2
 
 # img read
 
-frames = pims.open('wave\*.bmp')
-group_frames = pims.open('group_vel_iss2\*bmp')
+frames = pims.open('20Pa140323\*.bmp')
+group_frames = pims.open('group_vel_20pa\*bmp')
 background = pims.open('background\\1.bmp')
 
 test = group_frames[10] > 4
@@ -105,7 +105,7 @@ def crop_coord_y(frame):
     
     data = smooth(data,2)
     
-    plot_a(data)
+    #plot_a(data)
     
     return np.array(data).argmax()
            
@@ -367,13 +367,11 @@ def envelope(sig, distance):
     
     return u, l
 
-def wavefront_detection(group_frames,threshold, gate, gauss_sigma, envelope_step, cut_width, cut, reverse_data):
+def wavefront_detection(group_frames,threshold, gate, gauss_sigma, envelope_step, cut_width, cut, reverse_data, fps, pix_size):
     limit = []
 
     #cut = 1250 #int(group_frames[0].shape[0] - cut_width)  #cut out the bottom
 
-    fps = 62.5
-    pix_size = 14.2 * 10**(-3)  #in mm
     faktor = 1/(fps*pix_size)
 
     items = range(len(group_frames))
@@ -439,16 +437,20 @@ parameters = [np.arange(5,20,1),        #threshold
               np.arange(1,100,10),      #envelope_step
               ]
 #Adjustables
-cut = 600
-cut_width = 100
-reverse_data = False
 #
-threshold = 4
-gate = 2
-gauss_sigma = 20
+fps = 80
+pix_size = 0.0118 #14.2 * 10**(-3)  #in mm
+#
+cut = 1250
+cut_width = 90
+reverse_data = True
+#
+threshold = 3
+gate = 22
+gauss_sigma = 40
 envelope_step = 5
 #
-result_v, error = wavefront_detection(group_frames, threshold, gate, gauss_sigma, envelope_step, cut_width, cut, reverse_data)
+result_v, error = wavefront_detection(group_frames, threshold, gate, gauss_sigma, envelope_step, cut_width, cut, reverse_data, fps, pix_size)
 #%%
 
 def pattern2D(data, threshold, background, fps):
@@ -589,28 +591,29 @@ print("Shape of image series imported: " + str(frames.shape))
 
 #%%
 
-def gsc_wave_analysis(data, stepsize, peak_distance, peak_height):
+def gsc_wave_analysis(data, stepsize, peak_distance, peak_height, threshold, pixelsize, exptime):
     
     peaklist2 = []
 
     column = 0
     var_check = 10
-    
-    fig, ax = plt.subplots()
-    fig.set_size_inches(18.5, 10.5)
+
+    fig = plt.figure(figsize = (10,10), dpi=100) # create a 5 x 5 figure
+    ax = fig.gca()    
 
     for i in data:
         if var_check == 10:
-            cut = crop_coord_y(i>4)                          # >4 noise reduction! Adjustable
+            cut = crop_coord_y(i>threshold)                          # >4 noise reduction! Adjustable
             print(cut)
             var_check = 0
         else: var_check += 1;
-        frame_croped = i[cut-200:cut+200,:] > 4            # >4 noise reduction! Adjustable &&& cutsize 400 pixel!
+        
+        frame_croped = i[cut-200:cut+200,:] > threshold            # >4 noise reduction! Adjustable &&& cutsize 400 pixel!
         data = smooth(smooth(grayscale_h2(frame_croped),2),2)
         peaks, _ = find_peaks(data, distance=peak_distance, height=peak_height)
         #
-        ax.plot(data, linewidth=0.5)           #, color='#00429d'
-        ax.plot(peaks, data[peaks], "x")
+        plt.plot(data, linewidth=0.5)           #, color='#00429d'
+        plt.plot(peaks, data[peaks], "x")
         #
         if not len(peaklist2):
             peaklist2 = peaks.reshape((-1, 1))
@@ -630,6 +633,8 @@ def gsc_wave_analysis(data, stepsize, peak_distance, peak_height):
                     peaklist2[:,i] = (np.zeros(abs(temp.shape[0]-peaklist2.shape[0]))).append(peaklist2[:,i])
             peaklist2 = np.column_stack((peaklist2,temp))
     
+    
+    
     plt.xlabel('Pixel')
     plt.ylabel('Grayvalue')
 
@@ -641,9 +646,7 @@ def gsc_wave_analysis(data, stepsize, peak_distance, peak_height):
     ax.set_xlim(xmin=0)
     
     plt.show()
-        
-    pixelsize = 0.0118 #mm
-    exptime = 0.0125 #s = 1/frames per second
+    
     conv_value = pixelsize/exptime
     speed_list = [[] for _ in range(peaklist2.shape[0])]
     #stepsize = 3
@@ -747,18 +750,21 @@ def gsc_wave_analysis(data, stepsize, peak_distance, peak_height):
 #The STEPSIZE is the parameter that specifies the time interval, in frames, over which the phase speed is measured. Recommended > 3.
 #!Stop-Start>=STEPSIZE!
 
-start = 20
-stop = 200
+start = 0
+stop = 120
 print('start: ' + str(start) + ' stop: '+str(stop))
 
 stepsize = 4
 peak_distance_max = 250
 peak_height_min = 0.1
+threshold = 4
+pixelsize = 0.0118 #mm
+exptime = 0.0125 #s = 1/frames per second
 
-sl, wl = gsc_wave_analysis(frames[start:], stepsize, peak_distance_max, peak_height_min)
+sl, wl = gsc_wave_analysis(frames[start:], stepsize, peak_distance_max, peak_height_min, threshold, pixelsize, exptime)
 
 #%%
-plot_a(slf15_gauss)
+plot_a(sl)
 #%%
 #At this point the data is stored or/and added to the corresponding List (e.g. for different pressures), adjust!
 speed_list15 = sl
@@ -771,10 +777,10 @@ grayscaleplot(slf15)
 grayscaleplot(wavelen_list15)
 #
 #%% Gaussian Filter to smooth the data, adjust sigma!
-slf15_gauss = gaussian_filter1d(speed_list15, sigma=3)
-slf20_gauss = gaussian_filter1d(speed_list20, sigma=3)
-slf25_gauss = gaussian_filter1d(speed_list25, sigma=3)
-slf30_gauss = gaussian_filter1d(speed_list30, sigma=3)
+slf15_gauss = gaussian_filter1d(speed_list15, sigma=2)
+slf20_gauss = gaussian_filter1d(speed_list20, sigma=2)
+slf25_gauss = gaussian_filter1d(speed_list25, sigma=2)
+slf30_gauss = gaussian_filter1d(speed_list30, sigma=2)
 #%% ERROR
 error_15 = abs(np.subtract(speed_list15,slf15_gauss))
 error_20 = abs(np.subtract(speed_list20,slf20_gauss))
@@ -792,10 +798,16 @@ wl_error_25 = abs(np.subtract(wl25,wavelen_list25))
 wl_error_30 = abs(np.subtract(wl30,wavelen_list30))
 #%%
 #### Add Group velocity #####
-slf15 = np.add(speed_list15,82.1)
+slf15 = np.add(slf15_gauss,87.6)
 slf20 = np.add(speed_list20,73.8)
 slf25 = np.add(speed_list25,59.3)
 slf30 = np.add(speed_list30,56.7)
+#%%
+# Open a file in write mode ('w')
+with open('slf15.txt', 'w') as file:
+    # Write each element of the array to the file
+    for element in slf15:
+        file.write(str(element) + '\n')
 #%% PLOT
 #bigplot_wavelen(wl15, wl20, wl25, wl30)
 #bigplot_speed(speed_list, speed_list20, speed_list25, speed_list30)
@@ -843,8 +855,8 @@ k_b = 1.38065 * 10**(-23)   #m^2kg/s^2K
 eps_0 = 8.854 * 10**(-12)   #As/Vm
 e = 1.6022 * 10**(-19)      #C
 
-T_i = T_d = [0.06, 0.05, 0.035, 0.034] #eV
-T_iroom = [0.036, 0.034, 0.034, 0.032] #eV
+T_i = T_d = [0.065, 0.049, 0.034, 0.032] #eV
+T_iroom = [0.036, 0.034, 0.034, 0.032] #eV 
 T_e = [9.8, 9.0, 8.7, 8.5]  #, 8.5, 8.3, 7.8, 7.5] #15pa 20pa 30pa 40pa 50pa 60pa 70pa 80pa at current 0.5mA in eV
 
 a = (1.3/2) *10**(-6) #micrometer particle radius
@@ -862,9 +874,18 @@ V_td = (3*k_b*300/m_d)**(1/2) #(3*k_b*300/m_d)**(1/2) #particle thermal temperat
 
 
 R = 15 #mm
-r = [4.7, 5.8 ,3.5 ,4.2 ]
-n_e0 = [(0.8*scsp.jv(0,(2.4*r[0]/R))), (0.87*scsp.jv(0,(2.4*r[1]/R))), (0.92*scsp.jv(0,(2.4*r[2]/R))), (1.1*scsp.jv(0,(2.4*r[3]/R)))] #Antonivas n_e = n_e0*J(1,4r/R) bindable
+r = [3.54 ,3.79 ,2.36 ,2.95]
+n_e0 = [(0.8*scsp.jv(0,(2.4*r[0]/R))), (0.87*scsp.jv(0,(2.4*r[1]/R))), (0.92*scsp.jv(0,(2.4*r[2]/R))), (1.1*scsp.jv(0,(2.4*r[3]/R)))] #Antonivas n_e = n_e0*J(2,4r/R) bindable
 n_e0 = np.multiply(n_e0,10**14) #in m^-3
+
+T_n = 0.025
+p = [15, 20, 25, 30] #pa
+sigma_neon = 10**(-18) #m^2
+l_i = np.divide(T_n*11600,np.multiply(p,sigma_neon))
+#E_0 = [(2.4*scsp.jv(1,(2.4*r[0]/R))/scsp.jv(0,(2.4*r[0]/R))), (2.4*scsp.jv(1,(2.4*r[1]/R))/scsp.jv(0,(2.4*r[1]/R))), (2.4*scsp.jv(1,(2.4*r[2]/R))/scsp.jv(0,(2.4*r[2]/R))), (2.4*scsp.jv(1,(2.4*r[3]/R))/scsp.jv(0,(2.4*r[3]/R)))] #Antonivas n_e = n_e0*J(2,4r/R) bindable
+#E_0 = np.multiply(E_0,T_e)/(e*R)
+E_0 = [0.7, 0.8, 0.95, 1.2]
+T_i_calc = 2/9 * e * 1/k_b * np.multiply(l_i,E_0)
 
 # Particle charge
 Z_d = []
@@ -935,6 +956,11 @@ c_model_adj = model(x_fit, b, n)
 popt_lin, pcov_lin = curve_fit(model, x , C_dawlinear, sigma=[0.2,.15,.1,.1])
 b_lin, n_lin = popt_lin
 
+coef = np.polyfit(x,C_dawlinear,2)
+poly1d_fn = np.poly1d(coef)             # poly1d_fn is now a function which takes in x and returns an estimate for y
+coef2 = np.polyfit(x,C_daw,2)
+poly1d_fn2 = np.poly1d(coef2)             # poly1d_fn is now a function which takes in x and returns an estimate for y
+
 c_model_lin = model(x_fit_lin, b_lin, n_lin)
 
 print("Adj:"+str(np.sqrt(np.diag(pcov)))+" Lin:"+str(np.sqrt(np.diag(pcov_lin))))
@@ -953,6 +979,11 @@ fig.set_size_inches(4, 3)
 ax.errorbar(x, [82.1,70.8,59.3,57.2], yerr=error, fmt='^',color='#00429d', markersize=3, linewidth=1, capsize=1)
 ax.plot(x_fit, c_model_adj, linestyle='dashed', color='#00cc00', linewidth=.7)
 ax.plot(x_fit_lin, c_model_lin, linestyle='dashdot', color='#ff8000', linewidth=.7)
+ax.plot(x_fit, poly1d_fn(x_fit), linestyle='dashdot', color='#ff0000', linewidth=.7)
+ax.plot(x_fit, poly1d_fn2(x_fit), linestyle='dashed', color='#ff0000', linewidth=.7)
+
+print(poly1d_fn)
+print(poly1d_fn2)
 
 #Axes
 plt.xlabel('Pressure [Pa]')
