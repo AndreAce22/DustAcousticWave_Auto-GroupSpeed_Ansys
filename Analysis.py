@@ -39,10 +39,10 @@ import cv2
 # img read
 
 frames = pims.open('20Pa140323\*.bmp')
-group_frames = pims.open('group_vel_20pa\*bmp')
+group_frames = pims.open('group_vel_25pa\*bmp')
 background = pims.open('background\\1.bmp')
 
-test = group_frames[10] > 4
+test = group_frames[13] > 3
 
 # Optionally, tweak styles.
 matplotlib.rc('figure',  figsize=(10, 5))
@@ -438,19 +438,19 @@ parameters = [np.arange(5,20,1),        #threshold
               ]
 #Adjustables
 #
-fps = 80
+fps = 60
 pix_size = 0.0118 #14.2 * 10**(-3)  #in mm
 #
-cut = 1250
-cut_width = 90
+cut = 1270
+cut_width = 30
 reverse_data = True
 #
 threshold = 3
-gate = 22
-gauss_sigma = 40
+gate = .5
+gauss_sigma = 20
 envelope_step = 5
 #
-result_v, error = wavefront_detection(group_frames, threshold, gate, gauss_sigma, envelope_step, cut_width, cut, reverse_data, fps, pix_size)
+result_v, error = wavefront_detection(group_frames[:-7], threshold, gate, gauss_sigma, envelope_step, cut_width, cut, reverse_data, fps, pix_size)
 #%%
 
 def pattern2D(data, threshold, background, fps):
